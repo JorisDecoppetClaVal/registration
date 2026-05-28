@@ -45,13 +45,53 @@
 			{{ t('registration', 'Email is optional') }}
 		</NcCheckboxRadioSwitch>
 
-		<NcTextField
-			v-model="allowedDomains"
-			:label="domainListLabel"
-			:labelVisible="true"
-			:disabled="loading"
-			placeholder="nextcloud.com;*.example.com"
-			@update:modelValue="debounceSavingSlow" />
+		<div class="domain-list">
+			<div class="domain-list__header" aria-hidden="true">
+				<span>{{ domainListLabel }}</span>
+				<span>{{ t('registration', 'Domain group') }}</span>
+			</div>
+			<div
+				v-for="(domainRow, index) in allowedDomainRows"
+				:key="domainRow.id"
+				class="domain-list__row">
+				<NcTextField
+					v-model="domainRow.domain"
+					:label="domainListLabel"
+					:labelVisible="false"
+					:aria-label="domainListLabel"
+					:disabled="loading"
+					placeholder="nextcloud.com"
+					@update:modelValue="debounceSavingSlow" />
+				<NcSelect
+					v-model="domainRow.group"
+					:placeholder="t('registration', 'Select group')"
+					:options="groups"
+					:disabled="loading"
+					:searchable="true"
+					:tagWidth="60"
+					:loading="loadingGroups"
+					:closeOnSelect="false"
+					label="displayname"
+					@search="searchGroup"
+					@update:modelValue="saveData" />
+				<button
+					type="button"
+					class="domain-list__remove"
+					:aria-label="t('registration', 'Remove domain')"
+					:disabled="loading || allowedDomainRows.length === 1"
+					@click="removeDomainRow(index)">
+					<span aria-hidden="true">&times;</span>
+				</button>
+			</div>
+			<button
+				type="button"
+				class="domain-list__add"
+				:disabled="loading"
+				@click="addDomainRow">
+				<span aria-hidden="true">+</span>
+				{{ t('registration', 'Add domain') }}
+			</button>
+		</div>
 
 		<NcCheckboxRadioSwitch
 			v-model="domainsIsBlocklist"
@@ -193,13 +233,22 @@ type Group = {
 	canRemove: boolean
 }
 
+type DomainRow = {
+	id: number
+	domain: string
+	group: Group | null
+}
+
 const loading = ref(false)
 const loadingGroups = ref(false)
 const groups = ref<Group[]>([])
 const saveNotification = ref<unknown>(null)
 const adminApproval = ref<boolean>(loadState<boolean>('registration', 'admin_approval_required'))
 const registeredUserGroup = ref<Group>(loadState<Group>('registration', 'registered_user_group'))
-const allowedDomains = ref<string>(loadState<string>('registration', 'allowed_domains'))
+const initialAllowedDomains = loadState<string>('registration', 'allowed_domains') || ''
+const initialDomainGroups = loadState<Record<string, Group>>('registration', 'domain_groups') || {}
+const nextDomainRowId = ref(0)
+const allowedDomainRows = ref<DomainRow[]>(createDomainRows(initialAllowedDomains, initialDomainGroups))
 const domainsIsBlocklist = ref<boolean>(loadState<boolean>('registration', 'domains_is_blocklist'))
 const showDomains = ref<boolean>(loadState<boolean>('registration', 'show_domains'))
 const emailIsOptional = ref<boolean>(loadState<boolean>('registration', 'email_is_optional'))
@@ -231,6 +280,90 @@ const debounceSavingSlow = debounce(function() {
 	saveData()
 }, 2000)
 
+function createDomainRows(domains: string, domainGroups: Record<string, Group>): DomainRow[] {
+	const rows = parseDomains(domains).map((domain) => {
+		const normalizedDomain = normalizeDomain(domain)
+		return {
+			id: nextDomainRowId.value++,
+			domain,
+			group: domainGroups[normalizedDomain] ?? null,
+		}
+	})
+
+	if (rows.length === 0) {
+		rows.push(createEmptyDomainRow())
+	}
+
+	return rows
+}
+
+function createEmptyDomainRow(): DomainRow {
+	return {
+		id: nextDomainRowId.value++,
+		domain: '',
+		group: null,
+	}
+}
+
+function parseDomains(domains: string): string[] {
+	return domains
+		.split(';')
+		.map((domain) => domain.trim())
+		.filter((domain) => domain !== '')
+}
+
+function normalizeDomain(domain: string): string {
+	return domain.trim().toLowerCase()
+}
+
+function getDomainRowsPayload(): DomainRow[] {
+	const seenDomains = new Set<string>()
+	const rows: DomainRow[] = []
+
+	for (const row of allowedDomainRows.value) {
+		const domain = normalizeDomain(row.domain)
+		if (domain === '' || seenDomains.has(domain)) {
+			continue
+		}
+
+		seenDomains.add(domain)
+		rows.push({
+			...row,
+			domain,
+		})
+	}
+
+	return rows
+}
+
+const allowedDomainsPayload = computed(() => {
+	return getDomainRowsPayload()
+		.map((row) => row.domain)
+		.join(';')
+})
+
+const domainGroupsPayload = computed(() => {
+	const domainGroups: Record<string, string> = {}
+	for (const row of getDomainRowsPayload()) {
+		if (row.group?.id) {
+			domainGroups[row.domain] = row.group.id
+		}
+	}
+	return domainGroups
+})
+
+function addDomainRow() {
+	allowedDomainRows.value.push(createEmptyDomainRow())
+}
+
+function removeDomainRow(index: number) {
+	allowedDomainRows.value.splice(index, 1)
+	if (allowedDomainRows.value.length === 0) {
+		allowedDomainRows.value.push(createEmptyDomainRow())
+	}
+	saveData()
+}
+
 /**
  *
  */
@@ -245,7 +378,8 @@ async function saveData() {
 		const response = await axios.post(generateUrl('/apps/registration/settings'), {
 			admin_approval_required: adminApproval.value,
 			registered_user_group: registeredUserGroup.value?.id,
-			allowed_domains: allowedDomains.value,
+			allowed_domains: allowedDomainsPayload.value,
+			domain_groups: JSON.stringify(domainGroupsPayload.value),
 			domains_is_blocklist: domainsIsBlocklist.value,
 			show_domains: showDomains.value,
 			email_is_optional: emailIsOptional.value,
@@ -330,5 +464,76 @@ select {
 
 h3 {
 	margin-top: 25px;
+}
+
+.domain-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-width: 760px;
+	margin-top: 12px;
+}
+
+.domain-list__header,
+.domain-list__row {
+	display: grid;
+	grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) var(--default-clickable-area);
+	gap: 12px;
+	align-items: center;
+}
+
+.domain-list__header {
+	padding-inline: 0 var(--default-clickable-area);
+	color: var(--color-text-maxcontrast);
+	font-weight: 600;
+}
+
+.domain-list__row :deep(.input-field),
+.domain-list__row :deep(.select) {
+	width: 100%;
+	min-width: 0;
+}
+
+.domain-list__remove {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--default-clickable-area);
+	height: var(--default-clickable-area);
+	border: 0;
+	border-radius: var(--border-radius);
+	background-color: transparent;
+	color: var(--color-main-text);
+	font-size: 22px;
+	line-height: 1;
+	justify-self: end;
+}
+
+.domain-list__add {
+	display: inline-flex;
+	gap: 6px;
+	align-items: center;
+	align-self: start;
+	margin-top: 4px;
+}
+
+@media (max-width: 700px) {
+	.domain-list__header {
+		display: none;
+	}
+
+	.domain-list__row {
+		grid-template-columns: minmax(0, 1fr) var(--default-clickable-area);
+	}
+
+	.domain-list__row :deep(.select) {
+		grid-column: 1 / 2;
+	}
+
+	.domain-list__remove {
+		grid-column: 2 / 3;
+		grid-row: 1 / 3;
+		align-self: center;
+	}
 }
 </style>

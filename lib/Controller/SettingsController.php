@@ -39,6 +39,7 @@ class SettingsController extends Controller {
 	 *
 	 * @param string|null $registered_user_group all newly registered user will be put in this group
 	 * @param string $allowed_domains Registrations are only allowed for E-Mailadresses with these domains
+	 * @param string|null $domain_groups Groups linked to configured E-Mail domains
 	 * @param string $additional_hint show Text at user-creation form
 	 * @param string $email_verification_hint if filled embed Text in Verification mail send to user
 	 * @param string $username_policy_regex optional regex to check usernames against a pattern
@@ -63,12 +64,17 @@ class SettingsController extends Controller {
 		?bool $enforce_phone,
 		?bool $domains_is_blocklist,
 		?bool $show_domains,
-		?bool $disable_email_verification): DataResponse {
+		?bool $disable_email_verification,
+		?string $domain_groups = null): DataResponse {
 		// handle domains
-		if (($allowed_domains === '') || ($allowed_domains === null)) {
-			$this->config->deleteAppValue($this->appName, 'allowed_domains');
-		} else {
-			$this->config->setAppValue($this->appName, 'allowed_domains', $allowed_domains);
+		$allowedDomains = $this->normalizeDomains($allowed_domains);
+		$this->saveAllowedDomains($allowedDomains);
+
+		if ($domain_groups !== null) {
+			$response = $this->saveDomainGroups($domain_groups, $allowedDomains);
+			if ($response instanceof DataResponse) {
+				return $response;
+			}
 		}
 
 		// handle hints
@@ -112,30 +118,165 @@ class SettingsController extends Controller {
 
 		if ($registered_user_group === null) {
 			$this->config->deleteAppValue($this->appName, 'registered_user_group');
-			return new DataResponse([
-				'data' => [
-					'message' => $this->l10n->t('Saved'),
-				],
-				'status' => 'success',
-			]);
-		}
-
-		$group = $this->groupmanager->get($registered_user_group);
-		if ($group instanceof IGroup) {
+		} elseif (($group = $this->groupmanager->get($registered_user_group)) instanceof IGroup) {
 			$this->config->setAppValue($this->appName, 'registered_user_group', $registered_user_group);
+		} else {
 			return new DataResponse([
 				'data' => [
-					'message' => $this->l10n->t('Saved'),
+					'message' => $this->l10n->t('No such group'),
 				],
-				'status' => 'success',
-			]);
+				'status' => 'error',
+			], Http::STATUS_NOT_FOUND);
 		}
 
 		return new DataResponse([
 			'data' => [
-				'message' => $this->l10n->t('No such group'),
+				'message' => $this->l10n->t('Saved'),
 			],
-			'status' => 'error',
-		], Http::STATUS_NOT_FOUND);
+			'status' => 'success',
+		]);
+	}
+
+	/**
+	 * @AdminRequired
+	 */
+	public function domainGroups(string $allowed_domains, string $domain_groups): DataResponse {
+		$allowedDomains = $this->normalizeDomains($allowed_domains);
+		$this->saveAllowedDomains($allowedDomains);
+
+		$response = $this->saveDomainGroups($domain_groups, $allowedDomains);
+		if ($response instanceof DataResponse) {
+			return $response;
+		}
+
+		return new DataResponse([
+			'data' => [
+				'message' => $this->l10n->t('Saved'),
+			],
+			'status' => 'success',
+		]);
+	}
+
+	/**
+	 * @param string[] $allowedDomains
+	 */
+	private function saveAllowedDomains(array $allowedDomains): void {
+		if ($allowedDomains === []) {
+			$this->config->deleteAppValue($this->appName, 'allowed_domains');
+		} else {
+			$this->config->setAppValue($this->appName, 'allowed_domains', implode(';', $allowedDomains));
+		}
+	}
+
+	/**
+	 * @param string[] $allowedDomains
+	 */
+	private function saveDomainGroups(string $domainGroups, array $allowedDomains): ?DataResponse {
+		$domainGroups = $this->decodeDomainGroups($domainGroups);
+		if ($domainGroups === null) {
+			return new DataResponse([
+				'data' => [
+					'message' => $this->l10n->t('Invalid domain group configuration'),
+				],
+				'status' => 'error',
+			], Http::STATUS_BAD_REQUEST);
+		}
+
+		$domainGroups = $this->filterDomainGroups($domainGroups, $allowedDomains);
+		if ($domainGroups === null) {
+			return new DataResponse([
+				'data' => [
+					'message' => $this->l10n->t('No such group'),
+				],
+				'status' => 'error',
+			], Http::STATUS_NOT_FOUND);
+		}
+
+		if ($domainGroups === []) {
+			$this->config->deleteAppValue($this->appName, 'domain_groups');
+		} else {
+			$encodedDomainGroups = json_encode($domainGroups);
+			if ($encodedDomainGroups === false) {
+				return new DataResponse([
+					'data' => [
+						'message' => $this->l10n->t('Invalid domain group configuration'),
+					],
+					'status' => 'error',
+				], Http::STATUS_BAD_REQUEST);
+			}
+			$this->config->setAppValue($this->appName, 'domain_groups', $encodedDomainGroups);
+		}
+
+		return null;
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private function normalizeDomains(?string $allowedDomains): array {
+		$domains = explode(';', $allowedDomains ?? '');
+		$domains = array_map(static function (string $domain): string {
+			return strtolower(trim($domain));
+		}, $domains);
+		$domains = array_filter($domains, static function (string $domain): bool {
+			return $domain !== '';
+		});
+
+		return array_values(array_unique($domains));
+	}
+
+	/**
+	 * @return array<string, string>|null
+	 */
+	private function decodeDomainGroups(?string $domainGroups): ?array {
+		if ($domainGroups === null || $domainGroups === '') {
+			return [];
+		}
+
+		$domainGroups = json_decode($domainGroups, true);
+		if (!is_array($domainGroups)) {
+			return null;
+		}
+
+		$groups = [];
+		foreach ($domainGroups as $domain => $gid) {
+			if (!is_string($domain) || !is_string($gid)) {
+				continue;
+			}
+
+			$domain = strtolower(trim($domain));
+			$gid = trim($gid);
+			if ($domain === '' || $gid === '') {
+				continue;
+			}
+
+			$groups[$domain] = $gid;
+		}
+
+		return $groups;
+	}
+
+	/**
+	 * @param array<string, string> $domainGroups
+	 * @param string[] $allowedDomains
+	 * @return array<string, string>|null
+	 */
+	private function filterDomainGroups(array $domainGroups, array $allowedDomains): ?array {
+		$allowedDomains = array_flip($allowedDomains);
+		$groups = [];
+
+		foreach ($domainGroups as $domain => $gid) {
+			if (!isset($allowedDomains[$domain])) {
+				continue;
+			}
+
+			if (!$this->groupmanager->get($gid) instanceof IGroup) {
+				return null;
+			}
+
+			$groups[$domain] = $gid;
+		}
+
+		return $groups;
 	}
 }

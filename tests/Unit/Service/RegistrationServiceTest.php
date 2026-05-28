@@ -18,6 +18,7 @@ use OCA\Registration\Service\RegistrationService;
 use OCP\Accounts\IAccountManager;
 use OCP\IConfig;
 use OCP\IDBConnection;
+use OCP\IGroup;
 use OCP\IGroupManager;
 use OCP\IL10N;
 use OCP\IRequest;
@@ -47,6 +48,7 @@ class RegistrationServiceTest extends TestCase {
 	private $config;
 	/** @var ICrypto | MockObject */
 	private $crypto;
+	private IGroupManager $groupManager;
 	private RegistrationService $service;
 
 	public function setUp(): void {
@@ -62,7 +64,7 @@ class RegistrationServiceTest extends TestCase {
 		$userManager = \OC::$server->get(IUserManager::class);
 		$accountManager = $this->createMock(IAccountManager::class);
 		$this->config = $this->createMock(IConfig::class);
-		$groupManager = \OC::$server->get(IGroupManager::class);
+		$this->groupManager = \OC::$server->get(IGroupManager::class);
 		$random = \OC::$server->get(ISecureRandom::class);
 		$userSession = $this->createMock(IUserSession::class);
 		$request = $this->createMock(IRequest::class);
@@ -85,7 +87,7 @@ class RegistrationServiceTest extends TestCase {
 			$userManager,
 			$accountManager,
 			$this->config,
-			$groupManager,
+			$this->groupManager,
 			$random,
 			$userSession,
 			$request,
@@ -279,9 +281,47 @@ class RegistrationServiceTest extends TestCase {
 		$this->service->createAccount($reg, null, 'Full name', '+49 800 / 1110111');
 	}
 
+	public function testCreateAccountAddsDomainGroup(): void {
+		$defaultGroupId = 'registration_default_' . uniqid();
+		$domainGroupId = 'registration_domain_' . uniqid();
+		$defaultGroup = $this->groupManager->createGroup($defaultGroupId);
+		$domainGroup = $this->groupManager->createGroup($domainGroupId);
+
+		$this->assertInstanceOf(IGroup::class, $defaultGroup);
+		$this->assertInstanceOf(IGroup::class, $domainGroup);
+
+		$this->config->expects($this->atLeastOnce())
+			->method('getAppValue')
+			->willReturnCallback(function (string $app, string $key, string $default) use ($defaultGroupId, $domainGroupId): string {
+				$map = [
+					'registered_user_group' => $defaultGroupId,
+					'domain_groups' => json_encode(['example.com' => $domainGroupId]),
+					'admin_approval_required' => 'no',
+					'username_policy_regex' => '',
+					'show_fullname' => 'no',
+					'enforce_fullname' => 'no',
+					'show_phone' => 'no',
+					'enforce_phone' => 'no',
+					'newUser.sendEmail' => 'no',
+				];
+
+				return $map[$key] ?? $default;
+			});
+
+		$reg = new Registration();
+		$reg->setEmail('domain-user@example.com');
+		$reg->setEmailConfirmed(true);
+
+		$user = $this->service->createAccount($reg, 'domain_user_' . uniqid(), null, null, 'asdf');
+
+		$this->assertTrue($defaultGroup->inGroup($user));
+		$this->assertTrue($domainGroup->inGroup($user));
+	}
+
 	public function settingsCallback1(string $app, string $key, string $default): string {
 		$map = [
 			'registered_user_group' => 'none',
+			'domain_groups' => '[]',
 			'admin_approval_required' => 'no',
 			'username_policy_regex' => '',
 			'show_fullname' => 'yes',

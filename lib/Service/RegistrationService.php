@@ -216,25 +216,13 @@ class RegistrationService {
 	public function checkAllowedDomains(string $email): bool {
 		$allowedDomains = $this->getAllowedDomains();
 		if (!empty($allowedDomains)) {
-			[,$mailDomain] = explode('@', strtolower($email), 2);
+			$mailDomain = $this->getMailDomain($email);
+			if ($mailDomain === null) {
+				return false;
+			}
 
 			foreach ($allowedDomains as $domain) {
-				// valid domain, everything's fine
-
-				// Wildcards
-				if (str_contains($domain, '*')) {
-					// *.example.com
-					// Make save for regex:
-					// \*\.example\.com
-					$regexDomain = preg_quote($domain, '\\');
-					// Replace "\*" with an actual regex wildcard and set start and end:
-					// /^.+\.example\.com$/
-					$regexDomain = '/^' . str_replace('\\*', '.+', $regexDomain) . '$/';
-
-					if (preg_match($regexDomain, $mailDomain)) {
-						return true;
-					}
-				} elseif ($mailDomain === $domain) {
+				if ($this->mailDomainMatches($mailDomain, $domain)) {
 					return true;
 				}
 			}
@@ -252,6 +240,75 @@ class RegistrationService {
 		$allowedDomains = array_map('trim', $allowedDomains);
 		$allowedDomains = array_filter($allowedDomains);
 		return array_map('strtolower', $allowedDomains);
+	}
+
+	/**
+	 * @return array<string, string>
+	 */
+	public function getDomainGroups(): array {
+		$domainGroups = json_decode($this->config->getAppValue($this->appName, 'domain_groups', '[]'), true);
+		if (!is_array($domainGroups)) {
+			return [];
+		}
+
+		$groups = [];
+		foreach ($domainGroups as $domain => $gid) {
+			if (!is_string($domain) || !is_string($gid)) {
+				continue;
+			}
+
+			$domain = strtolower(trim($domain));
+			$gid = trim($gid);
+			if ($domain !== '' && $gid !== '') {
+				$groups[$domain] = $gid;
+			}
+		}
+
+		return $groups;
+	}
+
+	private function getMailDomain(string $email): ?string {
+		if (!str_contains($email, '@')) {
+			return null;
+		}
+
+		[,$mailDomain] = explode('@', strtolower($email), 2);
+		return $mailDomain;
+	}
+
+	private function mailDomainMatches(string $mailDomain, string $domain): bool {
+		// Wildcards
+		if (str_contains($domain, '*')) {
+			// *.example.com
+			// Make save for regex:
+			// \*\.example\.com
+			$regexDomain = preg_quote($domain, '\\');
+			// Replace "\*" with an actual regex wildcard and set start and end:
+			// /^.+\.example\.com$/
+			$regexDomain = '/^' . str_replace('\\*', '.+', $regexDomain) . '$/';
+
+			return preg_match($regexDomain, $mailDomain) === 1;
+		}
+
+		return $mailDomain === $domain;
+	}
+
+	/**
+	 * @return array{0: string, 1: string}
+	 */
+	private function getDomainGroupForEmail(string $email): array {
+		$mailDomain = $this->getMailDomain($email);
+		if ($mailDomain === null) {
+			return ['', ''];
+		}
+
+		foreach ($this->getDomainGroups() as $domain => $gid) {
+			if ($this->mailDomainMatches($mailDomain, $domain)) {
+				return [$domain, $gid];
+			}
+		}
+
+		return ['', ''];
 	}
 
 	/**
@@ -333,7 +390,8 @@ class RegistrationService {
 			$this->accountManager->updateAccount($account);
 		}
 
-		// Add user to group
+		// Add user to groups
+		$groupIds = [];
 		$registeredUserGroup = $this->config->getAppValue($this->appName, 'registered_user_group', 'none');
 		if ($registeredUserGroup !== 'none') {
 			$group = $this->groupManager->get($registeredUserGroup);
@@ -345,10 +403,25 @@ class RegistrationService {
 			} else {
 				$group->addUser($user);
 				$groupId = $group->getGID();
+				$groupIds[] = $groupId;
 			}
 		} else {
 			$groupId = '';
 		}
+
+		[$domain, $domainGroupId] = $this->getDomainGroupForEmail($registration->getEmail());
+		if ($domainGroupId !== '' && !in_array($domainGroupId, $groupIds, true)) {
+			$group = $this->groupManager->get($domainGroupId);
+			if ($group === null) {
+				// This might happen if the group is deleted after setting the domain mapping
+				$this->logger->error("You specified newly registered users from '$domain' be added to '$domainGroupId' group, but it does not exist.");
+			} else {
+				$group->addUser($user);
+				$groupIds[] = $group->getGID();
+			}
+		}
+
+		$groupId = $groupIds[0] ?? $groupId;
 
 		// disable user if this is requested by config
 		$adminApprovalRequired = $this->config->getAppValue($this->appName, 'admin_approval_required', 'no');

@@ -9,6 +9,7 @@
 return [
 	'routes' => [
 		['name' => 'settings#admin', 'url' => '/settings', 'verb' => 'POST'],
+		['name' => 'settings#domainGroups', 'url' => '/settings/domain-groups', 'verb' => 'POST'],
 		['name' => 'register#showEmailForm', 'url' => '/', 'verb' => 'GET'],
 		['name' => 'register#submitEmailForm', 'url' => '/', 'verb' => 'POST'],
 		['name' => 'register#showVerificationForm', 'url' => '/verify/{secret}', 'verb' => 'GET'],

@@ -43,6 +43,10 @@ class RegistrationSettings implements ISettings {
 			$this->config->getAppValue($this->appName, 'allowed_domains')
 		);
 		$this->initialState->provideInitialState(
+			'domain_groups',
+			$this->getDomainGroupDetailArray()
+		);
+		$this->initialState->provideInitialState(
 			'domains_is_blocklist',
 			$this->config->getAppValue($this->appName, 'domains_is_blocklist', 'no') === 'yes'
 		);
@@ -97,7 +101,9 @@ class RegistrationSettings implements ISettings {
 		);
 
 		Util::addScript('registration', 'registration-settings');
+		Util::addScript('registration', 'registration-domain-settings');
 		Util::addStyle('registration', 'registration-settings');
+		Util::addStyle('registration', 'registration-domain-settings');
 
 		return new TemplateResponse('registration', 'admin', [], TemplateResponse::RENDER_AS_BLANK);
 	}
@@ -120,5 +126,31 @@ class RegistrationSettings implements ISettings {
 		}
 
 		return [];
+	}
+
+	protected function getDomainGroupDetailArray(): array {
+		$domainGroups = json_decode($this->config->getAppValue($this->appName, 'domain_groups', '[]'), true);
+		if (!is_array($domainGroups)) {
+			return [];
+		}
+
+		$groups = [];
+		foreach ($domainGroups as $domain => $gid) {
+			if (!is_string($domain) || !is_string($gid)) {
+				continue;
+			}
+
+			$group = $this->getGroupDetailArray($gid);
+			if ($group === []) {
+				continue;
+			}
+
+			$domain = strtolower(trim($domain));
+			if ($domain !== '') {
+				$groups[$domain] = $group;
+			}
+		}
+
+		return $groups;
 	}
 }
