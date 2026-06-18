@@ -22,10 +22,10 @@ This file is generated from multiple sources. Included packages:
 	- version: 0.2.11
 	- license: MIT
 - @nextcloud/dialogs
-	- version: 7.3.0
+	- version: 7.4.0
 	- license: AGPL-3.0-or-later
 - @nextcloud/vue
-	- version: 9.8.0
+	- version: 9.8.2
 	- license: AGPL-3.0-or-later
 - @nextcloud/vue-select
 	- version: 4.1.0
@@ -34,7 +34,7 @@ This file is generated from multiple sources. Included packages:
 	- version: 5.2.2
 	- license: MIT
 - registration
-	- version: 2.9.0
+	- version: 3.0.0
 	- license: AGPL-3.0-or-later
 - toastify-js
 	- version: 1.12.0

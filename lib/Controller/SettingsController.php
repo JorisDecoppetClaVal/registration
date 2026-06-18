@@ -12,7 +12,7 @@ namespace OCA\Registration\Controller;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\DataResponse;
-use OCP\IConfig;
+use OCP\AppFramework\Services\IAppConfig;
 use OCP\IGroup;
 use OCP\IGroupManager;
 use OCP\IL10N;
@@ -20,22 +20,17 @@ use OCP\IRequest;
 
 class SettingsController extends Controller {
 
-	private IL10N $l10n;
-	private IConfig $config;
-	private IGroupManager $groupmanager;
-	/** @var string */
-	protected $appName;
-
-	public function __construct($appName, IRequest $request, IL10N $l10n, IConfig $config, IGroupManager $groupmanager) {
+	public function __construct(
+		protected $appName,
+		IRequest $request,
+		private IL10N $l10n,
+		private IAppConfig $config,
+		private IGroupManager $groupManager,
+	) {
 		parent::__construct($appName, $request);
-		$this->l10n = $l10n;
-		$this->config = $config;
-		$this->groupmanager = $groupmanager;
-		$this->appName = $appName;
 	}
 
 	/**
-	 * @AdminRequired
 	 *
 	 * @param string|null $registered_user_group all newly registered user will be put in this group
 	 * @param string $allowed_domains Registrations are only allowed for E-Mailadresses with these domains
@@ -78,21 +73,21 @@ class SettingsController extends Controller {
 		}
 
 		// handle hints
-		if (($additional_hint === '') || ($additional_hint === null)) {
-			$this->config->deleteAppValue($this->appName, 'additional_hint');
+		if ($additional_hint === '') {
+			$this->config->deleteAppValue('additional_hint');
 		} else {
-			$this->config->setAppValue($this->appName, 'additional_hint', $additional_hint);
+			$this->config->setAppValueString('additional_hint', $additional_hint);
 		}
 
-		if (($email_verification_hint === '') || ($email_verification_hint === null)) {
-			$this->config->deleteAppValue($this->appName, 'email_verification_hint');
+		if ($email_verification_hint === '') {
+			$this->config->deleteAppValue('email_verification_hint');
 		} else {
-			$this->config->setAppValue($this->appName, 'email_verification_hint', $email_verification_hint);
+			$this->config->setAppValueString('email_verification_hint', $email_verification_hint);
 		}
 
 		//handle regex
-		if (($username_policy_regex === '') || ($username_policy_regex === null)) {
-			$this->config->deleteAppValue($this->appName, 'username_policy_regex');
+		if ($username_policy_regex === '') {
+			$this->config->deleteAppValue('username_policy_regex');
 		} elseif ((@preg_match($username_policy_regex, null) === false)) {
 			// validate regex
 			return new DataResponse([
@@ -102,24 +97,24 @@ class SettingsController extends Controller {
 				'status' => 'error',
 			], Http::STATUS_BAD_REQUEST);
 		} else {
-			$this->config->setAppValue($this->appName, 'username_policy_regex', $username_policy_regex);
+			$this->config->setAppValueString('username_policy_regex', $username_policy_regex);
 		}
 
-		$this->config->setAppValue($this->appName, 'admin_approval_required', $admin_approval_required ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'email_is_optional', $email_is_optional ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'email_is_login', !$email_is_optional && $email_is_login ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'show_fullname', $show_fullname ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'enforce_fullname', $enforce_fullname ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'show_phone', $show_phone ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'enforce_phone', $enforce_phone ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'domains_is_blocklist', $domains_is_blocklist ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'show_domains', $show_domains ? 'yes' : 'no');
-		$this->config->setAppValue($this->appName, 'disable_email_verification', $disable_email_verification ? 'yes' : 'no');
+		$this->config->setAppValueBool('admin_approval_required', $admin_approval_required);
+		$this->config->setAppValueBool('email_is_optional', $email_is_optional);
+		$this->config->setAppValueBool('email_is_login', !$email_is_optional && $email_is_login);
+		$this->config->setAppValueBool('show_fullname', $show_fullname);
+		$this->config->setAppValueBool('enforce_fullname', $enforce_fullname);
+		$this->config->setAppValueBool('show_phone', $show_phone);
+		$this->config->setAppValueBool('enforce_phone', $enforce_phone);
+		$this->config->setAppValueBool('domains_is_blocklist', $domains_is_blocklist);
+		$this->config->setAppValueBool('show_domains', $show_domains);
+		$this->config->setAppValueBool('disable_email_verification', $disable_email_verification);
 
 		if ($registered_user_group === null) {
-			$this->config->deleteAppValue($this->appName, 'registered_user_group');
-		} elseif (($group = $this->groupmanager->get($registered_user_group)) instanceof IGroup) {
-			$this->config->setAppValue($this->appName, 'registered_user_group', $registered_user_group);
+			$this->config->deleteAppValue('registered_user_group');
+		} elseif (($group = $this->groupManager->get($registered_user_group)) instanceof IGroup) {
+			$this->config->setAppValueString('registered_user_group', $registered_user_group);
 		} else {
 			return new DataResponse([
 				'data' => [
@@ -162,9 +157,9 @@ class SettingsController extends Controller {
 	 */
 	private function saveAllowedDomains(array $allowedDomains): void {
 		if ($allowedDomains === []) {
-			$this->config->deleteAppValue($this->appName, 'allowed_domains');
+			$this->config->deleteAppValue('allowed_domains');
 		} else {
-			$this->config->setAppValue($this->appName, 'allowed_domains', implode(';', $allowedDomains));
+			$this->config->setAppValueString('allowed_domains', implode(';', $allowedDomains));
 		}
 	}
 
@@ -193,7 +188,7 @@ class SettingsController extends Controller {
 		}
 
 		if ($domainGroups === []) {
-			$this->config->deleteAppValue($this->appName, 'domain_groups');
+			$this->config->deleteAppValue('domain_groups');
 		} else {
 			$encodedDomainGroups = json_encode($domainGroups);
 			if ($encodedDomainGroups === false) {
@@ -204,7 +199,7 @@ class SettingsController extends Controller {
 					'status' => 'error',
 				], Http::STATUS_BAD_REQUEST);
 			}
-			$this->config->setAppValue($this->appName, 'domain_groups', $encodedDomainGroups);
+			$this->config->setAppValueString('domain_groups', $encodedDomainGroups);
 		}
 
 		return null;
@@ -270,7 +265,7 @@ class SettingsController extends Controller {
 				continue;
 			}
 
-			if (!$this->groupmanager->get($gid) instanceof IGroup) {
+			if (!$this->groupManager->get($gid) instanceof IGroup) {
 				return null;
 			}
 
