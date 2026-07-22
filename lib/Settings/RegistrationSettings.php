@@ -14,10 +14,10 @@ use OCP\AppFramework\Services\IAppConfig;
 use OCP\AppFramework\Services\IInitialState;
 use OCP\IGroup;
 use OCP\IGroupManager;
-use OCP\Settings\ISettings;
+use OCP\Settings\IDelegatedSettings;
 use OCP\Util;
 
-class RegistrationSettings implements ISettings {
+class RegistrationSettings implements IDelegatedSettings {
 
 	public function __construct(
 		protected string $appName,
@@ -117,6 +117,18 @@ class RegistrationSettings implements ISettings {
 	#[\Override]
 	public function getPriority(): int {
 		return 50;
+	}
+
+	#[\Override]
+	public function getName(): ?string {
+		return null;
+	}
+
+	#[\Override]
+	public function getAuthorizedAppConfig(): array {
+		return [
+			Application::APP_ID => ['/.*/'],
+		];
 	}
 
 	protected function getGroupDetailArray(string $gid): array {

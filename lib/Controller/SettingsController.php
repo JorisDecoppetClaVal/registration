@@ -9,8 +9,10 @@
 
 namespace OCA\Registration\Controller;
 
+use OCA\Registration\Settings\RegistrationSettings;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
+use OCP\AppFramework\Http\Attribute\AuthorizedAdminSetting;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\AppFramework\Services\IAppConfig;
 use OCP\IGroup;
@@ -45,6 +47,7 @@ class SettingsController extends Controller {
 	 * @param bool|null $show_domains should the email list be shown to the user or not
 	 * @return DataResponse
 	 */
+	#[AuthorizedAdminSetting(settings: RegistrationSettings::class)]
 	public function admin(?string $registered_user_group,
 		string $allowed_domains,
 		string $additional_hint,
@@ -135,6 +138,7 @@ class SettingsController extends Controller {
 	/**
 	 * @AdminRequired
 	 */
+	#[AuthorizedAdminSetting(settings: RegistrationSettings::class)]
 	public function domainGroups(string $allowed_domains, string $domain_groups): DataResponse {
 		$allowedDomains = $this->normalizeDomains($allowed_domains);
 		$this->saveAllowedDomains($allowedDomains);
